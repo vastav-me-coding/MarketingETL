@@ -1,0 +1,560 @@
+variables:
+  TF_ROOT: infrastructure/
+  TF_PLAN: plan_${ENVIRONMENT}.tfplan
+  TF_VAR_FILE: ../config/${ENVIRONMENT}.tfvars
+  TF_BACKEND_VAR_FILE: ../config/${ENVIRONMENT}_backend.tfvars
+  SKIP_NEW_IMAGE_BUILD: 'false'
+  SKIP_FLYWAY_MIGRATIONS: 'true'
+
+include:
+  - project: "aon/affinity/ods/ods_gitlabterraformmodules"
+    ref: master
+    file:
+      - '/templates/terraform/.terraform.yml'
+      - '/templates/ods-lambda-apis/.lambda.yml'
+      - '/templates/ods-lambda-apis/.bcf.yml'
+      - '/templates/flyway/.flyway.yml'
+
+stages:
+  # - test
+  - develop:validate
+  - develop:deploy
+  - develop:plan
+  - develop:apply
+  - develop:migrations
+  - develop:transfer
+  - staging:validate
+  - staging:deploy
+  - staging:plan
+  - staging:apply
+  - staging:migrations
+  - staging:transfer
+  - staging:transfer:manual
+  - production:validate
+  - production:deploy
+  - production:plan
+  - production:apply
+  - production:migrations
+  - production:transfer
+  - production:transfer:manual
+
+scheduled_file_transfer_develop:
+  stage: develop:transfer
+  variables:
+    LAMBDA_NAME: affinity-tds-ar4262-dv001-ods-etl-hc-mkt-notebook
+    EXECUTION_TYPE: scheduled
+    LIMIT: 10000
+    OFFSET: 0
+    KEY: active
+    MAX_RECORDS: 1167069
+    SLEEP_FOR: 3m
+    MAX_BATCHES: 1
+    EXECUTION_MODE: incremental
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_COMMIT_BRANCH == "develop"'
+  script:
+    - |
+        wget -O jq https://github.com/stedolan/jq/releases/download/jq-1.6/jq-linux64
+        chmod +x ./jq 
+        apk add --no-cache aws-cli
+        if [ "$EXECUTION_MODE" = "baseline" ]; then
+          echo $KEY
+          MAX_RECORDS=`expr $MAX_RECORDS + 0`
+          echo $MAX_RECORDS
+          LIMIT=`expr $LIMIT + 0`
+          echo $LIMIT
+          MAX_BATCHES=`expr $MAX_BATCHES + 0`
+          echo $MAX_BATCHES
+          OFFSET=0
+          while [ $OFFSET -lt $MAX_RECORDS ]; do
+            BATCHES=1
+            while [ $BATCHES -le $MAX_BATCHES ] && [ $OFFSET -lt $MAX_RECORDS ]; do
+              echo "BATCH: $BATCHES"
+              payload=$(./jq -n --arg execution_type "$EXECUTION_TYPE" --arg limit "$LIMIT" --arg offset "$OFFSET" --arg key "$KEY" --arg mode "$EXECUTION_MODE" '$ARGS.named')
+              echo $payload
+              aws lambda invoke --function-name $LAMBDA_NAME --cli-binary-format raw-in-base64-out --invocation-type Event --payload "$payload" ado_wiql.json
+              OFFSET=`expr $OFFSET + $LIMIT`
+              BATCHES=`expr $BATCHES + 1`
+            done
+            if [ $OFFSET -lt $MAX_RECORDS ]; then
+              sleep $SLEEP_FOR
+            fi
+          done
+        else
+          payload=$(./jq -n --arg execution_type "$EXECUTION_TYPE" --arg limit "$LIMIT" --arg offset "$OFFSET" --arg key "$KEY" --arg mode "$EXECUTION_MODE" '$ARGS.named')
+          echo $payload
+          aws lambda invoke --function-name $LAMBDA_NAME --cli-binary-format raw-in-base64-out --invocation-type Event --payload "$payload" ado_wiql.json
+        fi
+  tags:
+    - affinity
+    - aws
+    - nclavndapp00444
+    - dev
+    - useast1
+    - docker
+
+scheduled_file_transfer_staging:
+  stage: staging:transfer
+  variables:
+    LAMBDA_NAME: affinity-ods-ar4262-sg001-ado-wiql
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_COMMIT_BRANCH == "staging"'
+  script:
+    - 'aws lambda invoke --function-name $LAMBDA_NAME --cli-binary-format raw-in-base64-out --invocation-type Event --payload "{}" ado_wiql.json'
+  tags:
+    - affinity
+    - aws
+    - claviqap8021
+    - staging
+    - useast1
+    - docker
+
+scheduled_file_transfer_production:
+  stage: production:transfer
+  variables:
+    LAMBDA_NAME: affinity-tds-ar4262-pr001-ods-etl-hc-mkt-notebook
+    EXECUTION_TYPE: scheduled
+    LIMIT: 10000
+    OFFSET: 0
+    KEY: active
+    MAX_RECORDS: 1167069
+    SLEEP_FOR: 3m
+    MAX_BATCHES: 1
+    EXECUTION_MODE: incremental
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && $CI_COMMIT_BRANCH == "master"'
+  script:
+    - |
+        wget -O jq https://github.com/stedolan/jq/releases/download/jq-1.6/jq-linux64
+        chmod +x ./jq 
+        apk add --no-cache aws-cli
+        if [ "$EXECUTION_MODE" = "baseline" ]; then
+          echo $KEY
+          MAX_RECORDS=`expr $MAX_RECORDS + 0`
+          echo $MAX_RECORDS
+          LIMIT=`expr $LIMIT + 0`
+          echo $LIMIT
+          MAX_BATCHES=`expr $MAX_BATCHES + 0`
+          echo $MAX_BATCHES
+          OFFSET=0
+          while [ $OFFSET -lt $MAX_RECORDS ]; do
+            BATCHES=1
+            while [ $BATCHES -le $MAX_BATCHES ] && [ $OFFSET -lt $MAX_RECORDS ]; do
+              echo "BATCH: $BATCHES"
+              payload=$(./jq -n --arg execution_type "$EXECUTION_TYPE" --arg limit "$LIMIT" --arg offset "$OFFSET" --arg key "$KEY" --arg mode "$EXECUTION_MODE" '$ARGS.named')
+              echo $payload
+              aws lambda invoke --function-name $LAMBDA_NAME --cli-binary-format raw-in-base64-out --invocation-type Event --payload "$payload" ado_wiql.json
+              OFFSET=`expr $OFFSET + $LIMIT`
+              BATCHES=`expr $BATCHES + 1`
+            done
+            if [ $OFFSET -lt $MAX_RECORDS ]; then
+              sleep $SLEEP_FOR
+            fi
+          done
+        else
+          payload=$(./jq -n --arg execution_type "$EXECUTION_TYPE" --arg limit "$LIMIT" --arg offset "$OFFSET" --arg key "$KEY" --arg mode "$EXECUTION_MODE" '$ARGS.named')
+          echo $payload
+          aws lambda invoke --function-name $LAMBDA_NAME --cli-binary-format raw-in-base64-out --invocation-type Event --payload "$payload" ado_wiql.json
+        fi
+  tags:
+    - affinity
+    - aws
+    - prod
+    - useast1
+    - docker
+
+# test:
+#   stage: test
+#   image: docker-remote.repo.eap.aon.com/python
+#   script:
+#     #- pwd; ls -ltr; python3 --version
+#     #- python3 -m pip install -r requirements.txt
+#     - cd src
+#     # - python3 -m pytest -v
+#   rules:
+#     - if: '$CI_PIPELINE_SOURCE != "schedule" && ($CI_COMMIT_BRANCH == "develop" || $CI_COMMIT_BRANCH == "staging" || $CI_COMMIT_BRANCH == "master")'
+#   tags:
+#     - affinity
+#     - aws
+#     - nclavndapp00444
+#     - dev
+#     - useast1
+#     - docker
+
+validate_develop:
+  stage: develop:validate
+  variables:
+    ENVIRONMENT: develop
+  extends:
+    - .terraform-init
+  script:
+    - terraform validate
+  rules:
+    - if: '$CI_PIPELINE_SOURCE != "schedule" && $CI_COMMIT_BRANCH == "develop"'
+  tags:
+    - affinity
+    - aws
+    - nclavndapp00444
+    - dev
+    - useast1
+    - docker
+
+validate_staging:
+  stage: staging:validate
+  variables:
+    ENVIRONMENT: staging
+  extends:
+    - .terraform-init
+  script:
+    - terraform validate
+  rules:
+    - if: '$CI_PIPELINE_SOURCE != "schedule" && $CI_COMMIT_BRANCH == "staging"'
+  tags:
+    - affinity
+    - aws
+    - claviqap8021
+    - staging
+    - useast1
+    - docker
+
+validate_production:
+  stage: production:validate
+  variables:
+    ENVIRONMENT: production
+  extends:
+    - .terraform-init
+  script:
+    - terraform validate
+  rules:
+    - if: '$CI_PIPELINE_SOURCE != "schedule" && $CI_COMMIT_BRANCH == "master"'
+  tags:
+    - affinity
+    - aws
+    - prod
+    - useast1
+    - docker
+
+deploy_develop:
+  stage: develop:deploy
+  variables:
+    ENVIRONMENT: develop
+  # dependencies:
+  #   - test
+  extends:
+    - .docker-build-deploy
+  rules:
+    - if: '$CI_PIPELINE_SOURCE != "schedule" && $CI_COMMIT_BRANCH == "develop" && $SKIP_NEW_IMAGE_BUILD == "false"'
+  tags:
+    - affinity
+    - aws
+    - nclavndapp00444
+    - dev
+    - useast1
+    - docker
+
+deploy_staging:
+  stage: staging:deploy
+  variables:
+    ENVIRONMENT: staging
+  # dependencies:
+  #   - test
+  extends:
+    - .docker-build-deploy
+  rules:
+    - if: '$CI_PIPELINE_SOURCE != "schedule" && $CI_COMMIT_BRANCH == "staging" && $SKIP_NEW_IMAGE_BUILD == "false"'
+  tags:
+    - affinity
+    - aws
+    - claviqap8021
+    - staging
+    - useast1
+    - docker
+
+deploy_production:
+  stage: production:deploy
+  variables:
+    ENVIRONMENT: production
+  # dependencies:
+  #   - test
+  extends:
+    - .docker-build-deploy
+  rules:
+    - if: '$CI_PIPELINE_SOURCE != "schedule" && $CI_COMMIT_BRANCH == "master" && $SKIP_NEW_IMAGE_BUILD == "false"'
+  tags:
+    - affinity
+    - aws
+    - prod
+    - useast1
+    - docker
+
+pull_develop:
+  stage: develop:deploy
+  variables:
+    ENVIRONMENT: develop
+  # dependencies:
+  #   - test
+  extends:
+    - .docker-pull
+  rules:
+    - if: '$CI_PIPELINE_SOURCE != "schedule" && $CI_COMMIT_BRANCH == "develop" && $SKIP_NEW_IMAGE_BUILD == "true"'
+  tags:
+    - affinity
+    - aws
+    - nclavndapp00444
+    - dev
+    - useast1
+    - docker
+
+pull_staging:
+  stage: staging:deploy
+  variables:
+    ENVIRONMENT: staging
+  # dependencies:
+  #   - test
+  extends:
+    - .docker-pull
+  rules:
+    - if: '$CI_PIPELINE_SOURCE != "schedule" && $CI_COMMIT_BRANCH == "staging" && $SKIP_NEW_IMAGE_BUILD == "true"'
+  tags:
+    - affinity
+    - aws
+    - claviqap8021
+    - staging
+    - useast1
+    - docker
+
+pull_production:
+  stage: production:deploy
+  variables:
+    ENVIRONMENT: production
+  # dependencies:
+  #   - test
+  extends:
+    - .docker-pull
+  rules:
+    - if: '$CI_PIPELINE_SOURCE != "schedule" && $CI_COMMIT_BRANCH == "master" && $SKIP_NEW_IMAGE_BUILD == "true"'
+  tags:
+    - affinity
+    - aws
+    - prod
+    - useast1
+    - docker
+
+plan_develop:
+  stage: develop:plan
+  variables:
+    ENVIRONMENT: develop
+  dependencies:
+    - deploy_develop
+    - validate_develop
+    - pull_develop
+  extends:
+    - .terraform-init
+  script:
+    - echo $LATEST_IMAGE_SHA
+    - terraform plan --var-file=$TF_VAR_FILE --var="image_uri=$LATEST_IMAGE_SHA" --out $TF_PLAN
+  rules:
+    - if: '$CI_PIPELINE_SOURCE != "schedule" && $CI_COMMIT_BRANCH == "develop"'
+  artifacts:
+    paths:
+      - $TF_ROOT/$TF_PLAN
+  tags:
+    - affinity
+    - aws
+    - nclavndapp00444
+    - dev
+    - useast1
+    - docker
+
+plan_staging:
+  stage: staging:plan
+  variables:
+    ENVIRONMENT: staging
+  dependencies:
+    - deploy_staging
+    - validate_staging
+    - pull_staging
+  extends:
+    - .terraform-init
+  script:
+    - echo $LATEST_IMAGE_SHA
+    - terraform plan --var-file=$TF_VAR_FILE --var="image_uri=$LATEST_IMAGE_SHA" --out $TF_PLAN
+  rules:
+    - if: '$CI_PIPELINE_SOURCE != "schedule" && $CI_COMMIT_BRANCH == "staging"'
+  artifacts:
+    paths:
+      - $TF_ROOT/$TF_PLAN
+  tags:
+    - affinity
+    - aws
+    - claviqap8021
+    - staging
+    - useast1
+    - docker
+
+plan_production:
+  stage: production:plan
+  variables:
+    ENVIRONMENT: production
+  dependencies:
+    - deploy_production
+    - validate_production
+    - pull_production
+  extends:
+    - .terraform-init
+  script:
+    - echo $LATEST_IMAGE_SHA
+    - terraform plan --var-file=$TF_VAR_FILE --var="image_uri=$LATEST_IMAGE_SHA" --out $TF_PLAN
+  rules:
+    - if: '$CI_PIPELINE_SOURCE != "schedule" && $CI_COMMIT_BRANCH == "master"'
+  artifacts:
+    paths:
+      - $TF_ROOT/$TF_PLAN
+  tags:
+    - affinity
+    - aws
+    - prod
+    - useast1
+    - docker
+
+apply_develop:
+  stage: develop:apply
+  variables:
+    ENVIRONMENT: develop
+  dependencies:
+    - plan_develop
+  extends:
+    - .terraform-init
+  allow_failure: false
+  script:
+    - terraform apply --input=false --auto-approve $TF_PLAN
+  rules:
+    - if: '$CI_PIPELINE_SOURCE != "schedule" && $CI_COMMIT_BRANCH == "develop"'
+      when: manual
+  tags:
+    - affinity
+    - aws
+    - nclavndapp00444
+    - dev
+    - useast1
+    - docker
+
+apply_staging:
+  stage: staging:apply
+  variables:
+    ENVIRONMENT: staging
+  dependencies:
+    - plan_staging
+  extends:
+    - .terraform-init
+  script:
+    - terraform apply --input=false --auto-approve $TF_PLAN
+  allow_failure: false
+  rules:
+    - if: '$CI_PIPELINE_SOURCE != "schedule" && $CI_COMMIT_BRANCH == "staging"'
+      when: manual
+  tags:
+    - affinity
+    - aws
+    - claviqap8021
+    - staging
+    - useast1
+    - docker
+
+apply_production:
+  stage: production:apply
+  variables:
+    ENVIRONMENT: production
+  dependencies:
+    - plan_production
+  extends:
+    - .terraform-init
+  allow_failure: false
+  script:
+    - terraform apply --input=false --auto-approve $TF_PLAN
+  rules:
+    - if: '$CI_PIPELINE_SOURCE != "schedule" && $CI_COMMIT_BRANCH == "master"'
+      when: manual
+  tags:
+    - affinity
+    - aws
+    - prod
+    - useast1
+    - docker
+
+migrations_develop:
+  stage: develop:migrations
+  variables:
+    ENVIRONMENT: develop
+  dependencies:
+    - apply_develop
+  extends:
+    - .flyway-migrations
+  rules:
+    - if: '$CI_PIPELINE_SOURCE != "schedule" && $CI_COMMIT_BRANCH == "develop" && $SKIP_FLYWAY_MIGRATIONS == "false"'
+  tags:
+    - affinity
+    - aws
+    - nclavndapp00444
+    - dev
+    - useast1
+    - docker
+
+migrations_staging:
+  stage: staging:migrations
+  variables:
+    ENVIRONMENT: staging
+  dependencies:
+    - apply_staging
+  extends:
+    - .flyway-migrations
+  rules:
+    - if: '$CI_PIPELINE_SOURCE != "schedule" && $CI_COMMIT_BRANCH == "staging" && $SKIP_FLYWAY_MIGRATIONS == "false"'
+  tags:
+    - affinity
+    - aws
+    - claviqap8021
+    - staging
+    - useast1
+    - docker
+
+migrations_production:
+  stage: production:migrations
+  variables:
+    ENVIRONMENT: production
+  dependencies:
+    - apply_production
+  extends:
+    - .flyway-migrations
+  rules:
+    - if: '$CI_PIPELINE_SOURCE != "schedule" && $CI_COMMIT_BRANCH == "master" && $SKIP_FLYWAY_MIGRATIONS == "false"'
+  tags:
+    - affinity
+    - aws
+    - prod
+    - useast1
+    - docker
+  
+# stages:
+#   - pre
+#   - invoke
+#   - post
+# invoke_lambda_job:
+#   stage: invoke
+#   script:
+#     - echo "invoking lambda";
+#     - |
+#       offset = 0
+#       limit = 1000
+#       max = 70000
+#       while [$offset -lt $max ]; do
+#         echo "staging the loop offset $offset and limit $limit";
+#         aws lambda invoke \
+#           --function-name affinity-tds-ar4262-dv001-ods-etl-hc-mkt-notebook \
+#           --payload "{"offset":$offset,"limit":$limit}" \
+#           response_$offset.json;
+#         sleep 1;
+#         offset=$((offset + limit));
+#       done
+#     - echo "completed"
+  
